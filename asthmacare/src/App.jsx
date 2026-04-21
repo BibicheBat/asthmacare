@@ -174,15 +174,30 @@ function CrisisModal({ userId, existing, onClose, onSaved }) {
     if (!description.trim()) { setErr('La description est requise.'); return }
     if (ventoline === null)  { setErr('Indiquez si vous avez pris de la Ventoline.'); return }
     setSaving(true)
-    const payload = { description: description.trim(), lieu: lieu.trim()||null, ventoline, intensite, created_at: new Date(date).toISOString() }
+
+    // Always get the current authenticated user fresh from Supabase
+    const { data: { user }, error: authErr } = await supabase.auth.getUser()
+    if (authErr || !user) {
+      setErr('Session expirée. Veuillez vous reconnecter.')
+      setSaving(false); return
+    }
+
+    const payload = {
+      description: description.trim(),
+      lieu: lieu.trim() || null,
+      ventoline,
+      intensite,
+      created_at: new Date(date).toISOString(),
+    }
+
     let data, error
     if (isEdit) {
       ;({ data, error } = await supabase.from('crises').update(payload).eq('id', existing.id).select().single())
     } else {
-      ;({ data, error } = await supabase.from('crises').insert({ ...payload, user_id: userId }).select().single())
+      ;({ data, error } = await supabase.from('crises').insert({ ...payload, user_id: user.id }).select().single())
     }
     setSaving(false)
-    if (error) { setErr('Erreur lors de la sauvegarde.'); return }
+    if (error) { setErr(`Erreur: ${error.message} (code: ${error.code})`); return }
     onSaved(data, isEdit); onClose()
   }
 
