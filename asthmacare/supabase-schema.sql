@@ -1,56 +1,31 @@
 -- ============================================================
--- RESET COMPLET — exécutez ce script en entier dans
--- Supabase → SQL Editor → New query → Run
+-- À exécuter dans : supabase.com → votre projet → SQL Editor
 -- ============================================================
 
--- 1. Suppression des anciennes tables
-drop table if exists public.crises cascade;
-drop table if exists public.profiles cascade;
-
-
--- 2. Table profiles
-create table public.profiles (
+-- 1. Table des profils utilisateurs
+create table if not exists public.profiles (
   id   uuid primary key references auth.users(id) on delete cascade,
-  name text not null,
-  role text not null default 'user' check (role in ('user', 'viewer', 'admin'))
+  name text not null
 );
 
+-- Sécurité : chaque utilisateur ne voit que son propre profil
 alter table public.profiles enable row level security;
 
-create policy "profiles_select"
+create policy "Lecture profil personnel"
   on public.profiles for select
-  to authenticated
-  using (true);
+  using (auth.uid() = id);
 
-create policy "profiles_insert"
+create policy "Insertion profil personnel"
   on public.profiles for insert
-  to authenticated
   with check (auth.uid() = id);
 
-create policy "profiles_update"
+create policy "Mise à jour profil personnel"
   on public.profiles for update
-  to authenticated
-  using (
-    auth.uid() = id
-    or exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.role = 'admin'
-    )
-  );
-
-create policy "profiles_delete"
-  on public.profiles for delete
-  to authenticated
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.role = 'admin'
-    )
-  );
+  using (auth.uid() = id);
 
 
--- 3. Table crises
-create table public.crises (
+-- 2. Table des crises d'asthme
+create table if not exists public.crises (
   id          uuid primary key default gen_random_uuid(),
   user_id     uuid not null references auth.users(id) on delete cascade,
   description text not null,
@@ -60,38 +35,20 @@ create table public.crises (
   created_at  timestamptz not null default now()
 );
 
-create index crises_user_id_idx on public.crises(user_id);
+-- Index pour accélérer les requêtes par utilisateur
+create index if not exists crises_user_id_idx on public.crises(user_id);
 
+-- Sécurité : chaque utilisateur ne voit que ses propres crises
 alter table public.crises enable row level security;
 
-create policy "crises_select"
+create policy "Lecture crises personnelles"
   on public.crises for select
-  to authenticated
-  using (
-    auth.uid() = user_id
-    or exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.role in ('admin', 'viewer')
-    )
-  );
-
-create policy "crises_insert"
-  on public.crises for insert
-  to authenticated
-  with check (auth.uid() = user_id);
-
-create policy "crises_update"
-  on public.crises for update
-  to authenticated
   using (auth.uid() = user_id);
 
-create policy "crises_delete"
+create policy "Insertion crises personnelles"
+  on public.crises for insert
+  with check (auth.uid() = user_id);
+
+create policy "Suppression crises personnelles"
   on public.crises for delete
-  to authenticated
-  using (
-    auth.uid() = user_id
-    or exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.role = 'admin'
-    )
-  );
+  using (auth.uid() = user_id);
