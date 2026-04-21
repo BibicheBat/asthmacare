@@ -1,9 +1,15 @@
 -- ============================================================
--- À exécuter dans : supabase.com → votre projet → SQL Editor
+-- RESET COMPLET — exécutez ce script en entier dans
+-- Supabase → SQL Editor → New query → Run
 -- ============================================================
 
--- 1. Table des profils (avec rôle)
-create table if not exists public.profiles (
+-- 1. Suppression des anciennes tables
+drop table if exists public.crises cascade;
+drop table if exists public.profiles cascade;
+
+
+-- 2. Table profiles
+create table public.profiles (
   id   uuid primary key references auth.users(id) on delete cascade,
   name text not null,
   role text not null default 'user' check (role in ('user', 'viewer', 'admin'))
@@ -11,32 +17,30 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
--- Les utilisateurs voient leur propre profil
-create policy "Lecture profil personnel"
+create policy "profiles_select"
   on public.profiles for select
-  using (auth.uid() = id);
+  to authenticated
+  using (true);
 
-create policy "Insertion profil personnel"
+create policy "profiles_insert"
   on public.profiles for insert
+  to authenticated
   with check (auth.uid() = id);
 
-create policy "Mise à jour profil personnel"
+create policy "profiles_update"
   on public.profiles for update
-  using (auth.uid() = id);
-
--- Les admins et viewers voient tous les profils
-create policy "Admin/viewer voient tous les profils"
-  on public.profiles for select
+  to authenticated
   using (
-    exists (
+    auth.uid() = id
+    or exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.role in ('admin', 'viewer')
+      where p.id = auth.uid() and p.role = 'admin'
     )
   );
 
--- Les admins peuvent modifier les rôles
-create policy "Admin modifie les rôles"
-  on public.profiles for update
+create policy "profiles_delete"
+  on public.profiles for delete
+  to authenticated
   using (
     exists (
       select 1 from public.profiles p
@@ -45,8 +49,8 @@ create policy "Admin modifie les rôles"
   );
 
 
--- 2. Table des crises
-create table if not exists public.crises (
+-- 3. Table crises
+create table public.crises (
   id          uuid primary key default gen_random_uuid(),
   user_id     uuid not null references auth.users(id) on delete cascade,
   description text not null,
@@ -56,53 +60,38 @@ create table if not exists public.crises (
   created_at  timestamptz not null default now()
 );
 
-create index if not exists crises_user_id_idx on public.crises(user_id);
+create index crises_user_id_idx on public.crises(user_id);
 
 alter table public.crises enable row level security;
 
--- Chaque utilisateur gère ses propres crises
-create policy "Lecture crises personnelles"
+create policy "crises_select"
   on public.crises for select
-  using (auth.uid() = user_id);
-
-create policy "Insertion crises personnelles"
-  on public.crises for insert
-  with check (auth.uid() = user_id);
-
-create policy "Mise à jour crises personnelles"
-  on public.crises for update
-  using (auth.uid() = user_id);
-
-create policy "Suppression crises personnelles"
-  on public.crises for delete
-  using (auth.uid() = user_id);
-
--- Admins et viewers voient toutes les crises
-create policy "Admin/viewer voient toutes les crises"
-  on public.crises for select
+  to authenticated
   using (
-    exists (
+    auth.uid() = user_id
+    or exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.role in ('admin', 'viewer')
     )
   );
 
--- Admins peuvent supprimer n'importe quelle crise
-create policy "Admin supprime toute crise"
+create policy "crises_insert"
+  on public.crises for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+create policy "crises_update"
+  on public.crises for update
+  to authenticated
+  using (auth.uid() = user_id);
+
+create policy "crises_delete"
   on public.crises for delete
+  to authenticated
   using (
-    exists (
+    auth.uid() = user_id
+    or exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.role = 'admin'
     )
   );
-
-
--- ============================================================
--- CRÉER UN COMPTE ADMIN MANUELLEMENT
--- Après avoir créé votre premier compte via l'interface,
--- exécutez cette requête en remplaçant l'email :
--- ============================================================
--- update public.profiles
--- set role = 'admin'
--- where id = (select id from auth.users where email = 'votre@email.com');

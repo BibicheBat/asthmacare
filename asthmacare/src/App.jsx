@@ -101,16 +101,32 @@ function AuthPage({ onLogin }) {
         if (!name.trim() || !email.trim() || !password.trim()) { setErr('Tous les champs sont requis.'); setLoading(false); return }
         if (password.length < 6) { setErr('Minimum 6 caractères pour le mot de passe.'); setLoading(false); return }
         const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { name: name.trim() } } })
-        if (error) { setErr(error.message); setLoading(false); return }
-        await supabase.from('profiles').insert({ id: data.user.id, name: name.trim(), role: 'user' })
+        if (error) {
+          if (error.message.includes('rate limit') || error.message.includes('email')) {
+            setErr('Trop de tentatives. Attendez quelques minutes ou désactivez la confirmation email dans Supabase → Authentication → Providers → Email.')
+          } else {
+            setErr(error.message)
+          }
+          setLoading(false); return
+        }
+        // user may be null if email confirmation is required
+        if (!data.user) { setErr("Vérifiez votre boîte mail pour confirmer votre compte. Si le problème persiste, désactivez 'Confirm email' dans Supabase → Authentication → Providers → Email."); setLoading(false); return }
+        // upsert profile in case it already exists
+        await supabase.from('profiles').upsert({ id: data.user.id, name: name.trim(), role: 'user' }, { onConflict: 'id' })
         onLogin(data.user, name.trim(), 'user')
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
         if (error) { setErr('Email ou mot de passe incorrect.'); setLoading(false); return }
-        const { data: profile } = await supabase.from('profiles').select('name,role').eq('id', data.user.id).single()
-        onLogin(data.user, profile?.name || data.user.email, profile?.role || 'user')
+        // fetch profile, create it if missing
+        let { data: profile } = await supabase.from('profiles').select('name,role').eq('id', data.user.id).single()
+        if (!profile) {
+          const fallbackName = data.user.user_metadata?.name || data.user.email
+          await supabase.from('profiles').upsert({ id: data.user.id, name: fallbackName, role: 'user' }, { onConflict: 'id' })
+          profile = { name: fallbackName, role: 'user' }
+        }
+        onLogin(data.user, profile.name || data.user.email, profile.role || 'user')
       }
-    } catch { setErr('Une erreur est survenue.') }
+    } catch (e) { setErr('Une erreur est survenue : ' + e.message) }
     setLoading(false)
   }
 
@@ -580,8 +596,13 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        const { data: profile } = await supabase.from('profiles').select('name,role').eq('id', session.user.id).single()
-        setUser(session.user); setUserName(profile?.name||session.user.email); setUserRole(profile?.role||'user')
+        let { data: profile } = await supabase.from('profiles').select('name,role').eq('id', session.user.id).single()
+        if (!profile) {
+          const fallbackName = session.user.user_metadata?.name || session.user.email
+          await supabase.from('profiles').upsert({ id: session.user.id, name: fallbackName, role: 'user' }, { onConflict: 'id' })
+          profile = { name: fallbackName, role: 'user' }
+        }
+        setUser(session.user); setUserName(profile.name||session.user.email); setUserRole(profile.role||'user')
         fetchCrises(session.user.id)
       } else { setLoading(false) }
     })
